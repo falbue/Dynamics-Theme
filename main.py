@@ -276,13 +276,18 @@ def automatic_theme() -> None:
     """Monitor time and automatically switch theme based on sunrise/sunset."""
     backoff = 30  # initial backoff in seconds
     max_backoff = 600  # maximum backoff in seconds (10 minutes)
+    max_retries = 10  # maximum number of retry attempts
+    retry_count = 0
     sun_times = automatic_data()
     
-    while sun_times is None and not stop_event.is_set():
-        print(f"Failed to get data for automatic mode. Retrying in {backoff} seconds...")
-        time.sleep(backoff)
+    while sun_times is None and not stop_event.is_set() and retry_count < max_retries:
+        print(f"Failed to get data for automatic mode. Retrying in {backoff} seconds... (attempt {retry_count + 1}/{max_retries})")
+        stop_event.wait(backoff)  # Use wait instead of sleep for responsive stop handling
+        if stop_event.is_set():
+            break
         backoff = min(backoff * 2, max_backoff)
         sun_times = automatic_data()
+        retry_count += 1
     
     if sun_times is None:
         print("Could not fetch sunrise/sunset data after multiple attempts. Exiting automatic mode.")
@@ -302,7 +307,7 @@ def automatic_theme() -> None:
             if set_windows_theme(desired_theme):
                 current_applied_theme = desired_theme
 
-        time.sleep(60)
+        stop_event.wait(60)  # Use wait instead of sleep for responsive stop handling
 
 
 def get_translations(language: str) -> dict:
