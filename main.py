@@ -333,10 +333,14 @@ def create_tray_icon() -> None:
 
 def hide_icon() -> None:
     """Stop the tray icon and exit the application."""
+    global icon
+    stop_event.set()
     if icon:
         icon.stop()
-    os._exit(0)
+    import sys
+    sys.exit(0)
 
 
 if __name__ == "__main__":
     create_tray_icon()
+
