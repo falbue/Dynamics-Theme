@@ -220,7 +220,7 @@ def sun_time_local(sunrise_datetime_utc: datetime, sunset_datetime_utc: datetime
         return sunrise_time_local.strftime('%H:%M:%S'), sunset_time_local.strftime('%H:%M:%S')
     except Exception as e:
         print(f"Error converting to local time: {e}")
-        return None, None
+        return None
 
 
 def automatic_data() -> Optional[Tuple[str, str]]:
