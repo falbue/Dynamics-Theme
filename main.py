@@ -82,17 +82,18 @@ TRANSLATIONS = {
 stop_event: threading.Event = threading.Event()
 icon: Optional[pystray.Icon] = None
 
+
 def set_windows_theme(theme: str) -> bool:
     """Set Windows theme to light or dark mode and update tray icon.
-    
+
     Args:
         theme: Theme to set ('light' or 'dark')
-        
+
     Returns:
         True if theme was set successfully, False otherwise
     """
     global icon
-    
+
     try:
         registry_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_WRITE) as key:
@@ -108,7 +109,7 @@ def set_windows_theme(theme: str) -> bool:
 
             winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, theme_value)
             winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, theme_value)
-            
+
             if icon:
                 icon.icon = Image.open(icon_path)
 
@@ -119,9 +120,10 @@ def set_windows_theme(theme: str) -> bool:
         print(f"Error setting theme: {e}")
         return False
 
+
 def get_system_language() -> str:
     """Detect system language and return ISO 639 language code.
-    
+
     Returns:
         Two-letter language code (e.g., 'en', 'ru', 'es')
     """
@@ -133,20 +135,21 @@ def get_system_language() -> str:
 
         LOCALE_NAME_MAX_LENGTH = 85
         LOCALE_SISO639LANGNAME = 0x59
-        
+
         locale_name = ctypes.create_unicode_buffer(LOCALE_NAME_MAX_LENGTH)
 
         if kernel32.GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME, locale_name, LOCALE_NAME_MAX_LENGTH):
             return locale_name.value[:2].lower()
-        
+
         return 'en'
     except Exception as e:
         print(f"Error detecting system language: {e}")
         return 'en'
 
+
 def get_current_theme() -> Optional[int]:
     """Get current Windows theme setting.
-    
+
     Returns:
         1 if light theme is active, 0 if dark theme is active, None on error
     """
@@ -158,9 +161,10 @@ def get_current_theme() -> Optional[int]:
         print(f"Error getting current theme: {e}")
         return None
 
+
 def get_location() -> Tuple[Optional[float], Optional[float]]:
     """Get current geographic location using IP geolocation.
-    
+
     Returns:
         Tuple of (latitude, longitude) or (None, None) on error
     """
@@ -174,13 +178,14 @@ def get_location() -> Tuple[Optional[float], Optional[float]]:
         print(f"Error getting location: {e}")
         return None, None
 
+
 def get_sunrise_and_sunset(latitude: float, longitude: float) -> Tuple[Optional[datetime], Optional[datetime]]:
     """Calculate sunrise and sunset times for given coordinates.
-    
+
     Args:
         latitude: Geographic latitude
         longitude: Geographic longitude
-        
+
     Returns:
         Tuple of (sunrise_time_utc, sunset_time_utc) or (None, None) on error
     """
@@ -195,13 +200,14 @@ def get_sunrise_and_sunset(latitude: float, longitude: float) -> Tuple[Optional[
         print(f"Error calculating sunrise/sunset: {e}")
         return None, None
 
+
 def sun_time_local(sunrise_datetime_utc: datetime, sunset_datetime_utc: datetime) -> Optional[Tuple[str, str]]:
     """Convert UTC sunrise/sunset times to local time strings.
-    
+
     Args:
         sunrise_datetime_utc: Sunrise time in UTC
         sunset_datetime_utc: Sunset time in UTC
-        
+
     Returns:
         Tuple of (sunrise_local, sunset_local) formatted as 'HH:MM:SS', or None on error
     """
@@ -216,33 +222,36 @@ def sun_time_local(sunrise_datetime_utc: datetime, sunset_datetime_utc: datetime
         print(f"Error converting to local time: {e}")
         return None, None
 
+
 def automatic_data() -> Optional[Tuple[str, str]]:
     """Get sunrise and sunset times in local timezone.
-    
+
     Returns:
         Tuple of (sunrise, sunset) times formatted as 'HH:MM:SS', or None on error
     """
     latitude, longitude = get_location()
     if latitude is None or longitude is None:
         return None
-    
+
     sunrise_datetime_utc, sunset_datetime_utc = get_sunrise_and_sunset(latitude, longitude)
     if sunrise_datetime_utc is None or sunset_datetime_utc is None:
         return None
 
     return sun_time_local(sunrise_datetime_utc, sunset_datetime_utc)
 
+
 def get_local_time() -> str:
     """Get current local time formatted as 'HH:MM:SS'.
-    
+
     Returns:
         Current local time string
     """
     return datetime.now().strftime("%H:%M:%S")
 
+
 def select_theme(theme: str) -> None:
     """Select and apply a theme, starting automatic mode if requested.
-    
+
     Args:
         theme: Theme to apply ('auto', 'light', or 'dark')
     """
@@ -253,6 +262,7 @@ def select_theme(theme: str) -> None:
         print("Automatic mode disabled")
         set_windows_theme(theme)
 
+
 def start_automatic() -> None:
     """Start automatic theme switching in a background thread."""
     print("Automatic mode enabled")
@@ -261,32 +271,34 @@ def start_automatic() -> None:
     thread = threading.Thread(target=automatic_theme, daemon=True)
     thread.start()
 
+
 def automatic_theme() -> None:
     """Monitor time and automatically switch theme based on sunrise/sunset."""
     sun_times = automatic_data()
     if sun_times is None:
         print("Failed to get data for automatic mode")
         return
-    
+
     sunrise, sunset = sun_times
-    
+
     while not stop_event.is_set():
         local_time = get_local_time()
         print(f"Sunrise: {sunrise} | Current: {local_time} | Sunset: {sunset}")
-        
+
         if sunrise < local_time < sunset:
             set_windows_theme("light")
         else:
             set_windows_theme("dark")
-        
+
         time.sleep(60)
+
 
 def get_translations(language: str) -> dict:
     """Get translations for a specific language, with fallback to English.
-    
+
     Args:
         language: Two-letter language code
-        
+
     Returns:
         Dictionary of translations
     """
@@ -296,27 +308,28 @@ def get_translations(language: str) -> dict:
 def create_tray_icon() -> None:
     """Create and run the system tray icon with localized menu."""
     global icon
-    
+
     current_theme = get_current_theme()
     if current_theme is None:
         return
-    
+
     icon_path = f"lib/icon_{'light' if current_theme else 'dark'}.png"
     icon = pystray.Icon("dynamics_theme", Image.open(icon_path), APP_NAME)
-    
+
     language = get_system_language()
     translations = get_translations(language)
-    
+
     menu_items = [
         pystray.MenuItem(translations['dark'], lambda: select_theme('dark')),
         pystray.MenuItem(translations['light'], lambda: select_theme('light')),
         pystray.MenuItem(translations['automatic'], lambda: select_theme('auto')),
         pystray.MenuItem(translations['exit'], lambda: hide_icon())
     ]
-    
+
     icon.menu = pystray.Menu(*menu_items)
     start_automatic()
     icon.run()
+
 
 def hide_icon() -> None:
     """Stop the tray icon and exit the application."""
