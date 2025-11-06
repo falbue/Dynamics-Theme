@@ -3,6 +3,7 @@
 from typing import Optional, Tuple
 from datetime import datetime, timezone
 import ctypes
+import sys
 import threading
 import time
 
@@ -273,21 +274,33 @@ def start_automatic() -> None:
 
 def automatic_theme() -> None:
     """Monitor time and automatically switch theme based on sunrise/sunset."""
+    backoff = 30  # initial backoff in seconds
+    max_backoff = 600  # maximum backoff in seconds (10 minutes)
     sun_times = automatic_data()
+    
+    while sun_times is None and not stop_event.is_set():
+        print(f"Failed to get data for automatic mode. Retrying in {backoff} seconds...")
+        time.sleep(backoff)
+        backoff = min(backoff * 2, max_backoff)
+        sun_times = automatic_data()
+    
     if sun_times is None:
-        print("Failed to get data for automatic mode")
+        print("Could not fetch sunrise/sunset data after multiple attempts. Exiting automatic mode.")
         return
 
     sunrise, sunset = sun_times
+    current_applied_theme = None
 
     while not stop_event.is_set():
         local_time = get_local_time()
         print(f"Sunrise: {sunrise} | Current: {local_time} | Sunset: {sunset}")
 
-        if sunrise < local_time < sunset:
-            set_windows_theme("light")
-        else:
-            set_windows_theme("dark")
+        desired_theme = "light" if sunrise < local_time < sunset else "dark"
+        
+        # Only set theme if it needs to change
+        if desired_theme != current_applied_theme:
+            if set_windows_theme(desired_theme):
+                current_applied_theme = desired_theme
 
         time.sleep(60)
 
@@ -322,7 +335,7 @@ def create_tray_icon() -> None:
         pystray.MenuItem(translations['dark'], lambda: select_theme('dark')),
         pystray.MenuItem(translations['light'], lambda: select_theme('light')),
         pystray.MenuItem(translations['automatic'], lambda: select_theme('auto')),
-        pystray.MenuItem(translations['exit'], lambda: hide_icon())
+        pystray.MenuItem(translations['exit'], hide_icon)
     ]
 
     icon.menu = pystray.Menu(*menu_items)
@@ -336,7 +349,6 @@ def hide_icon() -> None:
     stop_event.set()
     if icon:
         icon.stop()
-    import sys
     sys.exit(0)
 
 
