@@ -1,106 +1,227 @@
-app_name = 'Dynamics Theme'
-version = '1.3'
+"""Dynamics Theme - Automatic Windows theme switcher based on sunrise/sunset times."""
 
-import ctypes
-import pystray
-from PIL import Image
-import winreg
-import requests
-import ephem
-import pytz
+from typing import Optional, Tuple
 from datetime import datetime, timezone
+import ctypes
+import os
 import threading
 import time
-import os
 
-def set_windows_theme(theme):  # Обновленный параметр для иконки
+import ephem
+import pystray
+import requests
+import winreg
+from PIL import Image
+
+APP_NAME = 'Dynamics Theme'
+VERSION = '1.3'
+
+TRANSLATIONS = {
+    'en': {
+        'dark': 'Dark ☾',
+        'light': 'Light ☼',
+        'automatic': 'Automatic',
+        'exit': 'Exit',
+    },
+    'ru': {
+        'dark': 'Тёмная ☾',
+        'light': 'Светлая ☼',
+        'automatic': 'Автоматическая',
+        'exit': 'Закрыть',
+    },
+    'es': {
+        'dark': 'Oscuro ☾',
+        'light': 'Claro ☼',
+        'automatic': 'Automático',
+        'exit': 'Salir',
+    },
+    'de': {
+        'dark': 'Dunkel ☾',
+        'light': 'Hell ☼',
+        'automatic': 'Automatisch',
+        'exit': 'Beenden',
+    },
+    'fr': {
+        'dark': 'Sombre ☾',
+        'light': 'Clair ☼',
+        'automatic': 'Automatique',
+        'exit': 'Quitter',
+    },
+    'it': {
+        'dark': 'Scuro ☾',
+        'light': 'Chiaro ☼',
+        'automatic': 'Automatico',
+        'exit': 'Esci',
+    },
+    'pt': {
+        'dark': 'Escuro ☾',
+        'light': 'Claro ☼',
+        'automatic': 'Automático',
+        'exit': 'Sair',
+    },
+    'zh': {
+        'dark': '深色 ☾',
+        'light': '浅色 ☼',
+        'automatic': '自动',
+        'exit': '退出',
+    },
+    'ja': {
+        'dark': 'ダーク ☾',
+        'light': 'ライト ☼',
+        'automatic': '自動',
+        'exit': '終了',
+    },
+    'ko': {
+        'dark': '어두운 ☾',
+        'light': '밝은 ☼',
+        'automatic': '자동',
+        'exit': '종료',
+    },
+}
+
+stop_event: threading.Event = threading.Event()
+icon: Optional[pystray.Icon] = None
+
+def set_windows_theme(theme: str) -> bool:
+    """Set Windows theme to light or dark mode and update tray icon.
+    
+    Args:
+        theme: Theme to set ('light' or 'dark')
+        
+    Returns:
+        True if theme was set successfully, False otherwise
+    """
+    global icon
+    
     try:
-        # Открываем ключ реестра для изменения настроек темы
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, winreg.KEY_WRITE) as key:
+        registry_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_WRITE) as key:
             if theme == "light":
-                winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, 1)
-                winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, 1)
-                icon.icon = Image.open("lib/icon_light.png")  # Изменяем иконку на светлую
+                theme_value = 1
+                icon_path = "lib/icon_light.png"
             elif theme == "dark":
-                winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, 0)
-                winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, 0)
-                icon.icon = Image.open("lib/icon_dark.png")  # Изменяем иконку на тёмную
+                theme_value = 0
+                icon_path = "lib/icon_dark.png"
             else:
-                print("Некорректная тема. Выберите 'light' или 'dark'.")
+                print(f"Invalid theme: '{theme}'. Choose 'light' or 'dark'.")
                 return False
 
-        # Уведомляем Windows о необходимости перезапуска темы
+            winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, theme_value)
+            winreg.SetValueEx(key, "SystemUsesLightTheme", 0, winreg.REG_DWORD, theme_value)
+            
+            if icon:
+                icon.icon = Image.open(icon_path)
+
         ctypes.windll.user32.SendMessageW(0xFFFF, 0x001A, 0, 0)
-        
-        print(f"Тема успешно изменена на '{theme}'.")
+        print(f"Theme successfully changed to '{theme}'.")
         return True
     except Exception as e:
-        print("Ошибка при установке темы:", e)
+        print(f"Error setting theme: {e}")
         return False
 
-def get_system_language():
-    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+def get_system_language() -> str:
+    """Detect system language and return ISO 639 language code.
     
-    # Получаем текущий язык системы
-    GetUserDefaultUILanguage = kernel32.GetUserDefaultUILanguage
-    GetUserDefaultUILanguage.restype = ctypes.c_uint
-    lcid = GetUserDefaultUILanguage()
+    Returns:
+        Two-letter language code (e.g., 'en', 'ru', 'es')
+    """
+    try:
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        GetUserDefaultUILanguage = kernel32.GetUserDefaultUILanguage
+        GetUserDefaultUILanguage.restype = ctypes.c_uint
+        lcid = GetUserDefaultUILanguage()
 
-    # Константа для получения имени языка
-    LOCALE_NAME_MAX_LENGTH = 85
-    LOCALE_SISO639LANGNAME = 0x59  # Локаль для ISO 639 языка
-    
-    locale_name = ctypes.create_unicode_buffer(LOCALE_NAME_MAX_LENGTH)
+        LOCALE_NAME_MAX_LENGTH = 85
+        LOCALE_SISO639LANGNAME = 0x59
+        
+        locale_name = ctypes.create_unicode_buffer(LOCALE_NAME_MAX_LENGTH)
 
-    # Получаем имя языка по LCID
-    if kernel32.GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME, locale_name, LOCALE_NAME_MAX_LENGTH):
-        lang = locale_name.value[:2]
-        return lang
-    else:
+        if kernel32.GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME, locale_name, LOCALE_NAME_MAX_LENGTH):
+            return locale_name.value[:2].lower()
+        
+        return 'en'
+    except Exception as e:
+        print(f"Error detecting system language: {e}")
         return 'en'
 
-def get_current_theme(): # получение текущей темы
+def get_current_theme() -> Optional[int]:
+    """Get current Windows theme setting.
+    
+    Returns:
+        1 if light theme is active, 0 if dark theme is active, None on error
+    """
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, winreg.KEY_READ) as key:
-            current_theme = winreg.QueryValueEx(key, "AppsUseLightTheme")[0]
-        return current_theme
+        registry_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_READ) as key:
+            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0]
     except Exception as e:
-        print("Ошибка при получении текущей темы:", e)
+        print(f"Error getting current theme: {e}")
         return None
 
-def get_location(): # получение координат
+def get_location() -> Tuple[Optional[float], Optional[float]]:
+    """Get current geographic location using IP geolocation.
+    
+    Returns:
+        Tuple of (latitude, longitude) or (None, None) on error
+    """
     try:
-        response = requests.get('https://ipinfo.io/json')
+        response = requests.get('https://ipinfo.io/json', timeout=10)
         response.raise_for_status()
         data = response.json()
         latitude, longitude = map(float, data['loc'].split(','))
         return latitude, longitude
     except Exception as e:
-        print("Ошибка при получении координат:", e)
+        print(f"Error getting location: {e}")
         return None, None
 
-def get_sunrise_and_sunset(latitude, longitude): # получение восхода и захода солнца
+def get_sunrise_and_sunset(latitude: float, longitude: float) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """Calculate sunrise and sunset times for given coordinates.
+    
+    Args:
+        latitude: Geographic latitude
+        longitude: Geographic longitude
+        
+    Returns:
+        Tuple of (sunrise_time_utc, sunset_time_utc) or (None, None) on error
+    """
     try:
         observer = ephem.Observer()
-        observer.lat, observer.lon = str(latitude), str(longitude)
+        observer.lat = str(latitude)
+        observer.lon = str(longitude)
         sunrise_time_utc = observer.next_rising(ephem.Sun()).datetime()
         sunset_time_utc = observer.next_setting(ephem.Sun()).datetime()
         return sunrise_time_utc, sunset_time_utc
     except Exception as e:
-        print("Ошибка при определении времени восхода и захода солнца:", e)
+        print(f"Error calculating sunrise/sunset: {e}")
         return None, None
 
-def sun_time_local(sunrise_datetime_utc, sunset_datetime_utc): # локальное время восхода солнца
+def sun_time_local(sunrise_datetime_utc: datetime, sunset_datetime_utc: datetime) -> Optional[Tuple[str, str]]:
+    """Convert UTC sunrise/sunset times to local time strings.
+    
+    Args:
+        sunrise_datetime_utc: Sunrise time in UTC
+        sunset_datetime_utc: Sunset time in UTC
+        
+    Returns:
+        Tuple of (sunrise_local, sunset_local) formatted as 'HH:MM:SS', or None on error
+    """
     try:
         local_offset = datetime.now(timezone.utc).astimezone().utcoffset()
+        if local_offset is None:
+            return None
         sunrise_time_local = sunrise_datetime_utc + local_offset
         sunset_time_local = sunset_datetime_utc + local_offset
         return sunrise_time_local.strftime('%H:%M:%S'), sunset_time_local.strftime('%H:%M:%S')
     except Exception as e:
-        print("Ошибка при получении локального времени восхода и захода солнца:", e)
+        print(f"Error converting to local time: {e}")
         return None, None
 
-def automatic_data(): # объединение функций
+def automatic_data() -> Optional[Tuple[str, str]]:
+    """Get sunrise and sunset times in local timezone.
+    
+    Returns:
+        Tuple of (sunrise, sunset) times formatted as 'HH:MM:SS', or None on error
+    """
     latitude, longitude = get_location()
     if latitude is None or longitude is None:
         return None
@@ -111,72 +232,98 @@ def automatic_data(): # объединение функций
 
     return sun_time_local(sunrise_datetime_utc, sunset_datetime_utc)
 
-def get_local_time(): # получение местного времени
-    local_time = datetime.now().strftime("%H:%M:%S")
-    return local_time
+def get_local_time() -> str:
+    """Get current local time formatted as 'HH:MM:SS'.
+    
+    Returns:
+        Current local time string
+    """
+    return datetime.now().strftime("%H:%M:%S")
 
-def select_theme(theme):
+def select_theme(theme: str) -> None:
+    """Select and apply a theme, starting automatic mode if requested.
+    
+    Args:
+        theme: Theme to apply ('auto', 'light', or 'dark')
+    """
     stop_event.set()
     if theme == 'auto':
         start_automatic()
     else:
-        print("Автомтический режим выключен")
+        print("Automatic mode disabled")
         set_windows_theme(theme)
 
-def start_automatic():
-    print("Автомтический режим включен")
+def start_automatic() -> None:
+    """Start automatic theme switching in a background thread."""
+    print("Automatic mode enabled")
     global stop_event
     stop_event = threading.Event()
-    thread = threading.Thread(target=automatic_theme)
+    thread = threading.Thread(target=automatic_theme, daemon=True)
     thread.start()
 
-def automatic_theme():
-    sunrise, sunset = automatic_data()
-    if sunrise is None or sunset is None:
-        print("Не удалось получить данные для автоматического режима")
+def automatic_theme() -> None:
+    """Monitor time and automatically switch theme based on sunrise/sunset."""
+    sun_times = automatic_data()
+    if sun_times is None:
+        print("Failed to get data for automatic mode")
         return
+    
+    sunrise, sunset = sun_times
     
     while not stop_event.is_set():
         local_time = get_local_time()
-        print(f"Восход: {sunrise}\nТекущее время: {local_time}\nЗаход: {sunset}")
+        print(f"Sunrise: {sunrise} | Current: {local_time} | Sunset: {sunset}")
+        
         if sunrise < local_time < sunset:
             set_windows_theme("light")
         else:
             set_windows_theme("dark")
+        
         time.sleep(60)
 
-def create_tray_icon(): # создание меню трея
+def get_translations(language: str) -> dict:
+    """Get translations for a specific language, with fallback to English.
+    
+    Args:
+        language: Two-letter language code
+        
+    Returns:
+        Dictionary of translations
+    """
+    return TRANSLATIONS.get(language, TRANSLATIONS['en'])
+
+
+def create_tray_icon() -> None:
+    """Create and run the system tray icon with localized menu."""
     global icon
+    
     current_theme = get_current_theme()
     if current_theme is None:
         return
     
-    icon = pystray.Icon("example", Image.open(f"lib/icon_{'light' if current_theme else 'dark'}.png"), app_name)
-        
-    # Определяем язык и устанавливаем тексты для меню
-    language = get_system_language()
+    icon_path = f"lib/icon_{'light' if current_theme else 'dark'}.png"
+    icon = pystray.Icon("dynamics_theme", Image.open(icon_path), APP_NAME)
     
-    if language == 'ru':
-        menu_items = [
-            pystray.MenuItem("Тёмная ☾", lambda: select_theme('dark')),
-            pystray.MenuItem("Светлая ☼", lambda: select_theme('light')),
-            pystray.MenuItem("Автоматическая", lambda: select_theme('auto')),
-            pystray.MenuItem("Закрыть", lambda: hide_icon())
-        ]
-    else:
-        menu_items = [
-            pystray.MenuItem("Dark ☾", lambda: select_theme('dark')),
-            pystray.MenuItem("Light ☼", lambda: select_theme('light')),
-            pystray.MenuItem("Automatic", lambda: select_theme('auto')),
-            pystray.MenuItem("Exit", lambda: hide_icon())
-        ]
+    language = get_system_language()
+    translations = get_translations(language)
+    
+    menu_items = [
+        pystray.MenuItem(translations['dark'], lambda: select_theme('dark')),
+        pystray.MenuItem(translations['light'], lambda: select_theme('light')),
+        pystray.MenuItem(translations['automatic'], lambda: select_theme('auto')),
+        pystray.MenuItem(translations['exit'], lambda: hide_icon())
+    ]
     
     icon.menu = pystray.Menu(*menu_items)
     start_automatic()
     icon.run()
 
-def hide_icon():
-    icon.stop()
+def hide_icon() -> None:
+    """Stop the tray icon and exit the application."""
+    if icon:
+        icon.stop()
     os._exit(0)
 
-create_tray_icon()
+
+if __name__ == "__main__":
+    create_tray_icon()
