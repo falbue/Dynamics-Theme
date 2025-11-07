@@ -1,0 +1,4 @@
+ephem
+pystray
+requests
+Pillow

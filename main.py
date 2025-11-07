@@ -1,6 +1,6 @@
 """Dynamics Theme - Automatic Windows theme switcher based on sunrise/sunset times."""
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 from datetime import datetime, timezone
 import ctypes
 import sys
@@ -80,7 +80,7 @@ TRANSLATIONS = {
 }
 
 stop_event: threading.Event = threading.Event()
-icon: Optional[pystray.Icon] = None
+icon: Optional[Any] = None
 
 
 def set_windows_theme(theme: str) -> bool:
